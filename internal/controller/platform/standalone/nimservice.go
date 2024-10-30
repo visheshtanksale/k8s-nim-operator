@@ -233,37 +233,45 @@ func (r *NIMServiceReconciler) reconcileNIMService(ctx context.Context, nimServi
 		// TODO: assign GPU resources and node selector that is required for the selected profile
 	}
 
-	// Sync deployment
-	err = r.renderAndSyncResource(ctx, nimService, &renderer, &appsv1.Deployment{}, func() (client.Object, error) {
-		return renderer.Deployment(deploymentParams)
-	}, "deployment", conditions.ReasonDeploymentFailed)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	// Wait for deployment
-	msg, ready, err := r.isDeploymentReady(ctx, &namespacedName)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	if !ready {
-		// Update status as NotReady
-		err = r.updater.SetConditionsNotReady(ctx, nimService, conditions.NotReady, msg)
-		r.GetEventRecorder().Eventf(nimService, corev1.EventTypeNormal, conditions.NotReady,
-			"NIMService %s not ready yet, msg: %s", nimService.Name, msg)
+	if nimService.IsMultiNodeEnabled() {
+		err = r.renderAndSyncResource(ctx, nimService, &renderer, &appsv1.Deployment{}, func() (client.Object, error) {
+			return renderer.Deployment(deploymentParams)
+		}, "deployment", conditions.ReasonDeploymentFailed)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 	} else {
-		// Update status as ready
-		err = r.updater.SetConditionsReady(ctx, nimService, conditions.Ready, msg)
-		r.GetEventRecorder().Eventf(nimService, corev1.EventTypeNormal, conditions.Ready,
-			"NIMService %s ready, msg: %s", nimService.Name, msg)
-	}
+		// Sync deployment
+		err = r.renderAndSyncResource(ctx, nimService, &renderer, &appsv1.Deployment{}, func() (client.Object, error) {
+			return renderer.Deployment(deploymentParams)
+		}, "deployment", conditions.ReasonDeploymentFailed)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 
-	if err != nil {
-		logger.Error(err, "Unable to update status")
-		return ctrl.Result{}, err
-	}
+		// Wait for deployment
+		msg, ready, err := r.isDeploymentReady(ctx, &namespacedName)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 
+		if !ready {
+			// Update status as NotReady
+			err = r.updater.SetConditionsNotReady(ctx, nimService, conditions.NotReady, msg)
+			r.GetEventRecorder().Eventf(nimService, corev1.EventTypeNormal, conditions.NotReady,
+				"NIMService %s not ready yet, msg: %s", nimService.Name, msg)
+		} else {
+			// Update status as ready
+			err = r.updater.SetConditionsReady(ctx, nimService, conditions.Ready, msg)
+			r.GetEventRecorder().Eventf(nimService, corev1.EventTypeNormal, conditions.Ready,
+				"NIMService %s ready, msg: %s", nimService.Name, msg)
+		}
+
+		if err != nil {
+			logger.Error(err, "Unable to update status")
+			return ctrl.Result{}, err
+		}
+	}
 	return ctrl.Result{}, nil
 }
 

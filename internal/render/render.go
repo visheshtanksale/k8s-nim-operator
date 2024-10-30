@@ -46,6 +46,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	yamlDecoder "k8s.io/apimachinery/pkg/util/yaml"
+	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 	yamlConverter "sigs.k8s.io/yaml"
 )
 
@@ -71,6 +72,7 @@ type Renderer interface {
 	Ingress(params *types.IngressParams) (*networkingv1.Ingress, error)
 	HPA(params *types.HPAParams) (*autoscalingv2.HorizontalPodAutoscaler, error)
 	ServiceMonitor(params *types.ServiceMonitorParams) (*monitoringv1.ServiceMonitor, error)
+	LWS(params *types.LWSParams) (*lws.LeaderWorkerSet, error)
 }
 
 // TemplateData is used by the templating engine to render templates
@@ -368,4 +370,25 @@ func (r *textTemplateRenderer) ServiceMonitor(params *types.ServiceMonitorParams
 		return nil, fmt.Errorf("error converting unstructured object to ServiceMonitor: %w", err)
 	}
 	return serviceMonitor, nil
+}
+
+func (r *textTemplateRenderer) LWS(params *types.LWSParams) (*lws.LeaderWorkerSet, error) {
+	//TODO implement me
+
+	objs, err := r.renderFile(path.Join(r.directory, "lws.yaml"), &TemplateData{Data: params})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(objs) == 0 {
+		return nil, nil
+	}
+
+	lws := &lws.LeaderWorkerSet{}
+	err = runtime.DefaultUnstructuredConverter.FromUnstructured(objs[0].Object, lws)
+	if err != nil {
+		return nil, fmt.Errorf("error converting unstructured object to LeaderWorkerSet: %w", err)
+	}
+	return lws, nil
+
 }

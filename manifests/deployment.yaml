@@ -116,6 +116,7 @@ spec:
         - name: {{ . }}
       {{- end }}
       {{- end }}
+      {{- end }}
       securityContext:
         seccompProfile:
           type: RuntimeDefault

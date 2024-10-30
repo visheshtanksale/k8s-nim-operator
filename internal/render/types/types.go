@@ -81,6 +81,35 @@ type DeploymentParams struct {
 	GroupID            *int64
 }
 
+type LWSParams struct {
+	Name               string
+	Namespace          string
+	Labels             map[string]string
+	Annotations        map[string]string
+	SelectorLabels     map[string]string
+	Replicas           int
+	ContainerName      string
+	Args               []string
+	Command            []string
+	Image              string
+	ImagePullSecrets   []string
+	ImagePullPolicy    string
+	Volumes            []corev1.Volume
+	VolumeMounts       []corev1.VolumeMount
+	Env                []corev1.EnvVar
+	Resources          *corev1.ResourceRequirements
+	NodeSelector       map[string]string
+	Tolerations        []corev1.Toleration
+	Affinity           *corev1.PodAffinity
+	LivenessProbe      *corev1.Probe
+	ReadinessProbe     *corev1.Probe
+	StartupProbe       *corev1.Probe
+	ServiceAccountName string
+	NIMCachePVC        string
+	UserID             *int64
+	GroupID            *int64
+}
+
 // StatefulSetParams holds the parameters for rendering a StatefulSet template
 type StatefulSetParams struct {
 	Name               string

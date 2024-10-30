@@ -506,6 +506,10 @@ func (n *NIMService) IsServiceMonitorEnabled() bool {
 	return n.Spec.Metrics.Enabled != nil && *n.Spec.Metrics.Enabled
 }
 
+func (n *NIMService) IsMultiNodeEnabled() bool {
+	return n.Spec.MultiNode.Enabled != nil && *n.Spec.MultiNode.Enabled
+}
+
 // GetServicePort returns the service port for the NIMService deployment
 func (n *NIMService) GetServicePort() int32 {
 	return n.Spec.Expose.Service.Port
@@ -589,6 +593,17 @@ func (n *NIMService) GetDeploymentParams() *rendertypes.DeploymentParams {
 
 	// Set service account
 	params.ServiceAccountName = n.GetServiceAccountName()
+	return params
+}
+
+func (n *NIMService) GetLWSParams() *rendertypes.LWSParams {
+	params := &rendertypes.LWSParams{}
+	// Set metadata
+	params.Name = n.GetName()
+	params.Namespace = n.GetNamespace()
+	params.Labels = n.GetServiceLabels()
+	params.Annotations = n.GetNIMServiceAnnotations()
+
 	return params
 }
 

@@ -30,12 +30,6 @@ spec:
             {{- .Annotations | yaml | nindent 10 }}
           {{- end }}
       spec:
-        {{- if .Values.initContainers.extraInit }}
-        initContainers:
-        {{- range .Values.initContainers.extraInit }}
-        - {{ . | toYaml | nindent 12 }}
-        {{- end }}
-        {{- end }}
         securityContext:
           {{- toYaml .Values.podSecurityContext | nindent 10 }}
         containers:
@@ -97,11 +91,11 @@ spec:
               - -c
               - |-
                 ssh-keygen -f \
-                {{ ternary "/root/pk/private.key" "/opt/nim/llm/pk/private.key" (eq (int $.Values.podSecurityContext.runAsUser) 0) }} \
-                -y > {{ include "nim-llm.sshDir" . }}/rsa.pub \
-                && cp {{ include "nim-llm.sshDir" . }}/rsa.pub {{ include "nim-llm.sshDir" . }}/authorized_keys \
-                && echo -e "Host *\n    IdentityFile {{ ternary "/root/pk/private.key" "/opt/nim/llm/pk/private.key" (eq (int $.Values.podSecurityContext.runAsUser) 0) }}" \
-                > {{ include "nim-llm.sshDir" . }}/config;
+                /opt/nim/llm/pk/private.key \
+                -y > /opt/nim/llm/.ssh/rsa.pub \
+                && cp /opt/nim/llm/.ssh/rsa.pub {{ include "nim-llm.sshDir" . }}/authorized_keys \
+                && echo -e "Host *\n    IdentityFile /opt/nim/llm/pk/private.key" \
+                > /opt/nim/llm/.ssh/config;
                 ticker=0;
                 grep -v '^localhost' "/etc/mpi/hostfile-${GROUP_INDEX}" | awk '{print $1}' | while read -r worker;
                 do
@@ -118,10 +112,7 @@ spec:
                   echo "$worker ready";
                 done;
                 mpirun \
-                {{- if eq (int $.Values.podSecurityContext.runAsUser) 0 }}
-                 --allow-run-as-root \
-                {{- end }}
-                -n {{ mul $.Values.multiNode.gpusPerNode $.Values.multiNode.workers | quote }} \
+                -n 1 \
                 -bind-to none \
                 --hostfile /etc/mpi/hostfile-${GROUP_INDEX} \
                 -map-by slot \
@@ -160,58 +151,41 @@ spec:
                 {{ get . "name" }} \
                 {{- end }}
                 /opt/nim/start-mpi-cluster.sh
-            ports:
-              {{- include "nim-llm.ports" . | nindent 14 }}
+            { { - with .Resources } }
             resources:
-              {{- toYaml .Values.resources | nindent 14 }}
+              { { . | yaml | nindent 14 } }
+            { { - end } }
             volumeMounts:
-              {{- include "nim-llm.volumeMounts" $ | nindent 14 }}
               - name: ssh-pk
-                mountPath: {{ ternary "/root/pk" "/opt/nim/llm/pk" (eq (int .Values.podSecurityContext.runAsUser) 0) }}
+                mountPath: /opt/nim/llm/pk
               - name: ssh-dotfiles
-                mountPath: {{ include "nim-llm.sshDir" . }}
+                mountPath: /opt/nim/llm/.ssh
               - name: mpi-config
                 mountPath: /etc/mpi
               - name: start-mpi-script
                 mountPath: /opt/nim/start-mpi-cluster.sh
                 subPath: start-mpi-cluster.sh
-            {{- include "nim-llm.probes" $ | indent 12 }}
-        {{- with .Values.nodeSelector }}
-        nodeSelector:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-        {{- with .Values.affinity }}
-        affinity:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-        {{- with .Values.tolerations }}
-        tolerations:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-        {{- with .Values.imagePullSecrets }}
+        { { - if .ImagePullSecrets } }
         imagePullSecrets:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
+        { { - range .ImagePullSecrets } }
+        - name: { { . } }
+        { { - end } }
+        { { - end } }
         volumes:
-          {{- include "nim-llm.multinodeVolumes" . | nindent 10 }}
           - name: mpi-config
             configMap:
-              name: {{ include "nim-llm.fullname" . }}-lws-mpi-config
+              name: {{ .Name }}-lws-mpi-config
               defaultMode: 0444
           - name: start-mpi-script
             configMap:
-              name: {{ include "nim-llm.fullname" . }}-mpi-start-script
+              name: {{ .Name }}-mpi-start-script
               defaultMode: 0555
           - name: ssh-dotfiles
             emptyDir: {}
           - name: ssh-pk
             secret:
               defaultMode: 256
-              {{- if .Values.multiNode.existingSSHSecret }}
-              secretName: {{ .Values.multiNode.existingSSHSecret }}
-              {{- else }}
-              secretName: {{ include "nim-llm.fullname" . }}-ssh-pk
-              {{- end }}
+              secretName: {{ .Name }}-ssh-pk
     workerTemplate:
       metadata:
         labels:
@@ -223,44 +197,32 @@ spec:
             { { - .Annotations | yaml | nindent 10 } }
             { { - end } }
       spec:
-        {{- if .Values.initContainers.extraInit }}
-        initContainers:
-        {{- range .Values.initContainers.extraInit }}
-        - {{ . | toYaml | nindent 12 }}
-        {{- end }}
-        {{- end }}
-        securityContext:
-          {{- toYaml .Values.podSecurityContext | nindent 10 }}
         containers:
           - name: nim-worker
-            image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+            image: {{ .Image }}
             command:
               - bash
               - -c
               - |-
                 ssh-keygen -f \
-                {{ ternary "/root/pk/private.key" "/opt/nim/llm/pk/private.key" (eq (int $.Values.podSecurityContext.runAsUser) 0) }} \
-                -y > {{ include "nim-llm.sshDir" . }}/rsa.pub \
-                && cp {{ include "nim-llm.sshDir" . }}/rsa.pub {{ include "nim-llm.sshDir" . }}/authorized_keys \
-                && echo -e "Host *\n    IdentityFile {{ ternary "/root/pk/private.key" "/opt/nim/llm/pk/private.key" (eq (int $.Values.podSecurityContext.runAsUser) 0) }}" \
-                {{- if eq (int .Values.podSecurityContext.runAsUser) 0 }}
-                chown root:root /var/run/sshd \
-                {{- end }}
+                /opt/nim/llm/pk/private.key \
+                -y > /opt/nim/llm/.ssh/rsa.pub \
+                && cp /opt/nim/llm/.ssh/rsa.pub /opt/nim/llm/.ssh/authorized_keys \
+                && echo -e "Host *\n    IdentityFile /opt/nim/llm/pk/private.key" \
                 && cp /etc/ssh/sshd_config /ssh-confs/.sshd_config && \
                 /usr/bin/ssh-keygen -f /ssh-confs/hostkey.rsa -N '' -t rsa && \
                 /usr/sbin/sshd -De -f /ssh-confs/.sshd_config -h /ssh-confs/hostkey.rsa
-            ports:
-              {{- include "nim-llm.ports" $ | nindent 14 }}
+            { { - with .Resources } }
             resources:
-              {{- toYaml .Values.resources | nindent 14 }}
+              { { . | yaml | nindent 14 } }
+            { { - end } }
             volumeMounts:
-              {{- include "nim-llm.volumeMounts" $ | nindent 14 }}
               - name: ssh-confs
                 mountPath: /ssh-confs
               - name: ssh-dotfiles
-                mountPath: {{ include "nim-llm.sshDir" . }}
+                mountPath: /opt/nim/llm/.ssh
               - name: ssh-pk
-                mountPath: {{ ternary "/root/pk" "/opt/nim/llm/pk" (eq (int .Values.podSecurityContext.runAsUser) 0) }}
+                mountPath: /opt/nim/llm/pk
               - name: start-mpi-script
                 mountPath: /opt/nim/start-mpi-cluster.sh
                 subPath: start-mpi-cluster.sh
@@ -305,24 +267,13 @@ spec:
                 valueFrom:
                   fieldRef:
                     fieldPath: metadata.labels['leaderworkerset.sigs.k8s.io/name']
-        {{- with .Values.nodeSelector }}
-        nodeSelector:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-        {{- with .Values.affinity }}
-        affinity:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-        {{- with .Values.tolerations }}
-        tolerations:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-        {{- with .Values.imagePullSecrets }}
+        { { - if .ImagePullSecrets } }
         imagePullSecrets:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
+        { { - range .ImagePullSecrets } }
+        - name: { { . } }
+        { { - end } }
+        { { - end } }
         volumes:
-          {{- include "nim-llm.multinodeVolumes" . | nindent 10 }}
           - name: ssh-confs
             emptyDir: {}
           - name: ssh-dotfiles
@@ -330,12 +281,8 @@ spec:
           - name: ssh-pk
             secret:
               defaultMode: 256
-              {{- if .Values.multiNode.existingSSHSecret }}
-              secretName: {{ .Values.multiNode.existingSSHSecret }}
-              {{- else }}
-              secretName: {{ include "nim-llm.fullname" . }}-ssh-pk
-              {{- end }}
+              secretName: {{ .Name }}-ssh-pk
           - name: start-mpi-script
-          configMap:
-            name: {{ include "nim-llm.fullname" . }}-mpi-start-script
-            defaultMode: 0555
+            configMap:
+              name:  {{ .Name }}-mpi-start-script
+              defaultMode: 0555
