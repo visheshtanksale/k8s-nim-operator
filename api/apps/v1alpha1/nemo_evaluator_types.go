@@ -35,21 +35,21 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-/* const (
-	// NemoGuardrailConditionReady indicates that the NEMO GuardrailService is ready.
-	NemoGuardrailConditionReady = "Ready"
-	// NemoGuardrailConditionFailed indicates that the NEMO GuardrailService has failed.
-	NemoGuardrailConditionFailed = "Failed"
+const (
+	// NemoEvaluatorConditionReady indicates that the NEMO EvaluatorService is ready.
+	NemoEvaluatorConditionReady = "Ready"
+	// NemoEvaluatorConditionFailed indicates that the NEMO EvaluatorService has failed.
+	NemoEvaluatorConditionFailed = "Failed"
 
-	// NemoGuardrailStatusPending indicates that NEMO GuardrailService is in pending state
-	NemoGuardrailStatusPending = "Pending"
-	// NemoGuardrailStatusNotReady indicates that NEMO GuardrailService is not ready
-	NemoGuardrailStatusNotReady = "NotReady"
-	// NemoGuardrailStatusReady indicates that NEMO GuardrailService is ready
-	NemoGuardrailStatusReady = "Ready"
-	// NemoGuardrailStatusFailed indicates that NEMO GuardrailService has failed
-	NemoGuardrailStatusFailed = "Failed"
-) */
+	// NemoEvaluatorStatusPending indicates that NEMO EvaluatorService is in pending state
+	NemoEvaluatorStatusPending = "Pending"
+	// NemoEvaluatorStatusNotReady indicates that NEMO EvaluatorService is not ready
+	NemoEvaluatorStatusNotReady = "NotReady"
+	// NemoEvaluatorStatusReady indicates that NEMO EvaluatorService is ready
+	NemoEvaluatorStatusReady = "Ready"
+	// NemoEvaluatorStatusFailed indicates that NEMO EvaluatorService has failed
+	NemoEvaluatorStatusFailed = "Failed"
+)
 
 // NemoEvaluatorSpec defines the desired state of NemoEvaluator
 type NemoEvaluatorSpec struct {
@@ -58,7 +58,6 @@ type NemoEvaluatorSpec struct {
 	Args    []string        `json:"args,omitempty"`
 	Env     []corev1.EnvVar `json:"env,omitempty"`
 	// The name of an secret that contains authn for the NGC NIM service API
-	AuthSecret     string                       `json:"authSecret"`
 	Labels         map[string]string            `json:"labels,omitempty"`
 	Annotations    map[string]string            `json:"annotations,omitempty"`
 	NodeSelector   map[string]string            `json:"nodeSelector,omitempty"`
@@ -77,6 +76,11 @@ type NemoEvaluatorSpec struct {
 	UserID       *int64 `json:"userID,omitempty"`
 	GroupID      *int64 `json:"groupID,omitempty"`
 	RuntimeClass string `json:"runtimeClass,omitempty"`
+
+	Mongodb       Mongodb       `json:"mongodb"`
+	ArgoWorkFlows ArgoWorkFlows `json:"argoWorkFlows"`
+	Milvus        Milvus        `json:"milvus"`
+	DataStore     DataStore     `json:"dataStore"`
 }
 
 // NemoEvaluatorStatus defines the observed state of NemoEvaluator
@@ -97,8 +101,8 @@ type NemoEvaluator struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   NemoGuardrailSpec   `json:"spec,omitempty"`
-	Status NemoGuardrailStatus `json:"status,omitempty"`
+	Spec   NemoEvaluatorSpec   `json:"spec,omitempty"`
+	Status NemoEvaluatorStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -107,83 +111,154 @@ type NemoEvaluator struct {
 type NemoEvaluatorList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []NemoGuardrail `json:"items"`
+	Items           []NemoEvaluator `json:"items"`
 }
 
-// GetPVCName returns the name to be used for the PVC based on the custom spec
-// Prefers pvc.Name if explicitly set by the user in the NemoGuardrail instance
-func (n *NemoEvaluator) GetPVCName(pvc PersistentVolumeClaim) string {
-	pvcName := fmt.Sprintf("%s-pvc", n.GetName())
-	if pvc.Name != "" {
-		pvcName = pvc.Name
-	}
-	return pvcName
+type Mongodb struct {
+	Endpoint string `json:"endpoint"`
 }
 
-// GetStandardSelectorLabels returns the standard selector labels for the NemoGuardrail deployment
+type ArgoWorkFlows struct {
+	Endpoint       string `json:"endpoint"`
+	ServiceAccount string `json:"serviceAccount"`
+}
+
+type Milvus struct {
+	Endpoint string `json:"endpoint"`
+}
+
+type DataStore struct {
+	Endpoint string `json:"endpoint"`
+}
+
+// GetStandardSelectorLabels returns the standard selector labels for the NemoEvaluator deployment
 func (n *NemoEvaluator) GetStandardSelectorLabels() map[string]string {
 	return map[string]string{
-		"app": n.Name,
+		"app.kubernetes.io/name": n.Name,
 	}
 }
 
-// GetStandardLabels returns the standard set of labels for NemoGuardrail resources
+// GetStandardLabels returns the standard set of labels for NemoEvaluator resources
 func (n *NemoEvaluator) GetStandardLabels() map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":             n.Name,
 		"app.kubernetes.io/instance":         n.Name,
 		"app.kubernetes.io/operator-version": os.Getenv("OPERATOR_VERSION"),
-		"app.kubernetes.io/part-of":          "nemo-guardrail-service",
+		"app.kubernetes.io/part-of":          "nemo-evaluator-service",
 		"app.kubernetes.io/managed-by":       "k8s-nim-operator",
 	}
 }
 
-// GetStandardEnv returns the standard set of env variables for the NemoGuardrail container
+// GetStandardEnv returns the standard set of env variables for the NemoEvaluator container
 func (n *NemoEvaluator) GetStandardEnv() []corev1.EnvVar {
 	// add standard env required for NIM service
 	envVars := []corev1.EnvVar{
 		{
-			Name:  "CONFIG_STORE_PATH",
-			Value: "/config-store",
+			Name:  "NAMESPACE",
+			Value: n.Namespace,
 		},
 		{
-			Name:  "NIM_ENDPOINT_URL",
-			Value: "https://integrate.api.nvidia.com/v1",
+			Name: "HOST_IP",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					APIVersion: "v1",
+					FieldPath:  "status.hostIP",
+				},
+			},
 		},
 		{
-			Name:  "DEFAULT_CONFIG_ID",
-			Value: "default",
-		},
-		{
-			Name:  "DEFAULT_LLM_PROVIDER",
-			Value: "nim",
-		},
-		{
-			Name:  "NEMO_GUARDRAILS_SERVER_ENABLE_CORS",
-			Value: "False",
-		},
-		{
-			Name:  "NEMO_GUARDRAILS_SERVER_ALLOWED_ORIGINS",
-			Value: "*",
-		},
-		{
-			Name:  "GUARDRAILS_HOST",
+			Name:  "EVALUATOR_HOST",
 			Value: "0.0.0.0",
 		},
 		{
-			Name:  "GUARDRAILS_PORT",
+			Name:  "EVALUATOR_PORT",
 			Value: "7331",
 		},
 		{
-			Name:  "DEMO",
-			Value: "False",
+			Name:  "DATABASE_URI",
+			Value: n.Spec.Mongodb.Endpoint,
 		},
+		{
+			Name:  "DATABASE_NAME",
+			Value: "evaluations",
+		},
+		{
+			Name:  "ARGO_HOST",
+			Value: n.Spec.ArgoWorkFlows.Endpoint,
+		},
+		{
+			Name:  "MILVUS_URL",
+			Value: n.Spec.Milvus.Endpoint,
+		},
+		{
+			Name:  "SERVICE_ACCOUNT",
+			Value: n.Spec.ArgoWorkFlows.ServiceAccount,
+		},
+		{
+			Name:  "DATA_STORE_HOST",
+			Value: n.Spec.DataStore.Endpoint,
+		},
+		{
+			Name: "INFERENCE_URL",
+		},
+		{
+			Name:  "DATABASE_USERNAME",
+			Value: "root",
+		},
+		{
+			Name: "DATABASE_PASSWORD",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					Key:                  "mongodb-root-password",
+					LocalObjectReference: corev1.LocalObjectReference{Name: "myrelease-mongodb"},
+				},
+			},
+		},
+		{
+			Name:  "EVAL_CONTAINER",
+			Value: n.GetImage(),
+		},
+		{
+			Name:  "EVAL_ENABLE_VALIDATION",
+			Value: "True",
+		},
+		{
+			Name:  "OTEL_TRACES_EXPORTER",
+			Value: "none",
+		},
+		{
+			Name:  "OTEL_METRICS_EXPORTER",
+			Value: "none",
+		},
+		{
+			Name:  "OTEL_LOGS_EXPORTER",
+			Value: "none",
+		},
+		{
+			Name:  "OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED",
+			Value: "false",
+		},
+		{
+			Name:  "LOG_HANDLERS",
+			Value: "console",
+		},
+		{
+			Name:  "CONSOLE_LOG_LEVEL",
+			Value: "INFO",
+		},
+		{
+			Name:  "EVAL_LOG_LEVEL",
+			Value: "INFO",
+		},
+
+		////////////////////////////////
+
 	}
 
 	return envVars
 }
 
-// GetStandardAnnotations returns default annotations to apply to the NemoGuardrail instance
+// GetStandardAnnotations returns default annotations to apply to the NemoEvaluator instance
 func (n *NemoEvaluator) GetStandardAnnotations() map[string]string {
 	standardAnnotations := map[string]string{
 		"openshift.io/scc": "nonroot",
@@ -191,7 +266,7 @@ func (n *NemoEvaluator) GetStandardAnnotations() map[string]string {
 	return standardAnnotations
 }
 
-// GetNemoGuardrailAnnotations returns annotations to apply to the NemoGuardrail instance
+// GetNemoEvaluatorAnnotations returns annotations to apply to the NemoEvaluator instance
 func (n *NemoEvaluator) GetNemoEvaluatorAnnotations() map[string]string {
 	standardAnnotations := n.GetStandardAnnotations()
 
@@ -202,7 +277,7 @@ func (n *NemoEvaluator) GetNemoEvaluatorAnnotations() map[string]string {
 	return standardAnnotations
 }
 
-// GetServiceLabels returns merged labels to apply to the NemoGuardrail instance
+// GetServiceLabels returns merged labels to apply to the NemoEvaluator instance
 func (n *NemoEvaluator) GetServiceLabels() map[string]string {
 	standardLabels := n.GetStandardLabels()
 
@@ -212,38 +287,38 @@ func (n *NemoEvaluator) GetServiceLabels() map[string]string {
 	return standardLabels
 }
 
-// GetSelectorLabels returns standard selector labels to apply to the NemoGuardrail instance
+// GetSelectorLabels returns standard selector labels to apply to the NemoEvaluator instance
 func (n *NemoEvaluator) GetSelectorLabels() map[string]string {
 	// TODO: add custom ones
 	return n.GetStandardSelectorLabels()
 }
 
-// GetNodeSelector returns node selector labels for the NemoGuardrail instance
+// GetNodeSelector returns node selector labels for the NemoEvaluator instance
 func (n *NemoEvaluator) GetNodeSelector() map[string]string {
 	return n.Spec.NodeSelector
 }
 
-// GetTolerations returns tolerations for the NemoGuardrail instance
+// GetTolerations returns tolerations for the NemoEvaluator instance
 func (n *NemoEvaluator) GetTolerations() []corev1.Toleration {
 	return n.Spec.Tolerations
 }
 
-// GetPodAffinity returns pod affinity for the NemoGuardrail instance
+// GetPodAffinity returns pod affinity for the NemoEvaluator instance
 func (n *NemoEvaluator) GetPodAffinity() *corev1.PodAffinity {
 	return n.Spec.PodAffinity
 }
 
-// GetContainerName returns name of the container for NemoGuardrail deployment
+// GetContainerName returns name of the container for NemoEvaluator deployment
 func (n *NemoEvaluator) GetContainerName() string {
 	return fmt.Sprintf("%s-ctr", n.Name)
 }
 
-// GetCommand return command to override for the NemoGuardrail container
+// GetCommand return command to override for the NemoEvaluator container
 func (n *NemoEvaluator) GetCommand() []string {
 	return n.Spec.Command
 }
 
-// GetArgs return arguments for the NemoGuardrail container
+// GetArgs return arguments for the NemoEvaluator container
 func (n *NemoEvaluator) GetArgs() []string {
 	return n.Spec.Args
 }
@@ -253,7 +328,7 @@ func (n *NemoEvaluator) GetEnv() []corev1.EnvVar {
 	return utils.MergeEnvVars(n.GetStandardEnv(), n.Spec.Env)
 }
 
-// GetImage returns container image for the NemoGuardrail
+// GetImage returns container image for the NemoEvaluator
 func (n *NemoEvaluator) GetImage() string {
 	return fmt.Sprintf("%s:%s", n.Spec.Image.Repository, n.Spec.Image.Tag)
 }
@@ -268,12 +343,12 @@ func (n *NemoEvaluator) GetImagePullPolicy() string {
 	return n.Spec.Image.PullPolicy
 }
 
-// GetResources returns resources to allocate to the NemoGuardrail container
+// GetResources returns resources to allocate to the NemoEvaluator container
 func (n *NemoEvaluator) GetResources() *corev1.ResourceRequirements {
 	return n.Spec.Resources
 }
 
-// GetLivenessProbe returns liveness probe for the NemoGuardrail container
+// GetLivenessProbe returns liveness probe for the NemoEvaluator container
 func (n *NemoEvaluator) GetLivenessProbe() *corev1.Probe {
 	if n.Spec.LivenessProbe.Probe == nil {
 		return n.GetDefaultLivenessProbe()
@@ -281,29 +356,28 @@ func (n *NemoEvaluator) GetLivenessProbe() *corev1.Probe {
 	return n.Spec.LivenessProbe.Probe
 }
 
-// GetDefaultLivenessProbe returns the default liveness probe for the NemoGuardrail container
+// GetDefaultLivenessProbe returns the default liveness probe for the NemoEvaluator container
 func (n *NemoEvaluator) GetDefaultLivenessProbe() *corev1.Probe {
 	probe := corev1.Probe{
-		InitialDelaySeconds: 15,
-		TimeoutSeconds:      1,
-		PeriodSeconds:       10,
-		SuccessThreshold:    1,
-		FailureThreshold:    3,
+		FailureThreshold: 3,
+		PeriodSeconds:    10,
+		SuccessThreshold: 1,
+		TimeoutSeconds:   1,
 		ProbeHandler: corev1.ProbeHandler{
 			HTTPGet: &corev1.HTTPGetAction{
-				Path: "/v1/health/live",
+				Path: "/health",
 				Port: intstr.IntOrString{
-					Type:   intstr.Type(0),
-					IntVal: n.Spec.Expose.Service.Port,
+					Type:   intstr.Type(1),
+					StrVal: "http",
 				},
+				Scheme: "HTTP",
 			},
 		},
 	}
-
 	return &probe
 }
 
-// GetReadinessProbe returns readiness probe for the NemoGuardrail container
+// GetReadinessProbe returns readiness probe for the NemoEvaluator container
 func (n *NemoEvaluator) GetReadinessProbe() *corev1.Probe {
 	if n.Spec.ReadinessProbe.Probe == nil {
 		return n.GetDefaultReadinessProbe()
@@ -311,20 +385,19 @@ func (n *NemoEvaluator) GetReadinessProbe() *corev1.Probe {
 	return n.Spec.ReadinessProbe.Probe
 }
 
-// GetDefaultReadinessProbe returns the default readiness probe for the NemoGuardrail container
+// GetDefaultReadinessProbe returns the default readiness probe for the NemoEvaluator container
 func (n *NemoEvaluator) GetDefaultReadinessProbe() *corev1.Probe {
 	probe := corev1.Probe{
-		InitialDelaySeconds: 15,
-		TimeoutSeconds:      1,
-		PeriodSeconds:       10,
-		SuccessThreshold:    1,
-		FailureThreshold:    3,
+		FailureThreshold: 3,
+		PeriodSeconds:    10,
+		SuccessThreshold: 1,
+		TimeoutSeconds:   1,
 		ProbeHandler: corev1.ProbeHandler{
 			HTTPGet: &corev1.HTTPGetAction{
-				Path: "/v1/health/ready",
+				Path: "/health",
 				Port: intstr.IntOrString{
-					Type:   intstr.Type(0),
-					IntVal: n.Spec.Expose.Service.Port,
+					Type:   intstr.Type(1),
+					StrVal: "http",
 				},
 			},
 		},
@@ -333,97 +406,32 @@ func (n *NemoEvaluator) GetDefaultReadinessProbe() *corev1.Probe {
 	return &probe
 }
 
-// GetStartupProbe returns startup probe for the NemoGuardrail container
+// GetStartupProbe returns startup probe for the NemoEvaluator container
 func (n *NemoEvaluator) GetStartupProbe() *corev1.Probe {
-	if n.Spec.StartupProbe.Probe == nil {
-		return n.GetDefaultStartupProbe()
-	}
 	return n.Spec.StartupProbe.Probe
 }
 
-// GetDefaultStartupProbe returns the default startup probe for the NemoGuardrail container
-func (n *NemoEvaluator) GetDefaultStartupProbe() *corev1.Probe {
-	probe := corev1.Probe{
-		InitialDelaySeconds: 40,
-		TimeoutSeconds:      1,
-		PeriodSeconds:       10,
-		SuccessThreshold:    1,
-		FailureThreshold:    180,
-		ProbeHandler: corev1.ProbeHandler{
-			HTTPGet: &corev1.HTTPGetAction{
-				Path: "/v1/health/ready",
-				Port: intstr.IntOrString{
-					Type:   intstr.Type(0),
-					IntVal: n.Spec.Expose.Service.Port,
-				},
-			},
-		},
-	}
-
-	return &probe
-}
-
-// GetVolumes returns volumes for the NemoGuardrail container
-func (n *NemoEvaluator) GetVolumes() []corev1.Volume {
-	volumes := []corev1.Volume{}
-	if n.Spec.ConfigStore.ConfigMap != "" {
-		volumes = append(volumes, corev1.Volume{
-			Name: "config-store",
-			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: n.Spec.ConfigStore.ConfigMap,
-					},
-				},
-			},
-		})
-	} else {
-		volumes = append(volumes, corev1.Volume{
-			Name: "config-store",
-			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: n.Spec.ConfigStore.PVC.Name,
-				},
-			},
-		})
-	}
-	return volumes
-}
-
-// GetVolumeMounts returns volumes for the NemoGuardrail container
-func (n *NemoEvaluator) GetVolumeMounts() []corev1.VolumeMount {
-	volumeMount := corev1.VolumeMount{
-		Name:      "config-store",
-		MountPath: "/config-store",
-	}
-	if n.Spec.ConfigStore.PVC != nil {
-		volumeMount.SubPath = n.Spec.ConfigStore.PVC.SubPath
-	}
-
-	return []corev1.VolumeMount{volumeMount}
-}
-
-// GetServiceAccountName returns service account name for the NemoGuardrail deployment
+// GetServiceAccountName returns service account name for the NemoEvaluator deployment
 func (n *NemoEvaluator) GetServiceAccountName() string {
 	return n.Name
 }
 
-// GetRuntimeClass return the runtime class name for the NemoGuardrail deployment
+// GetRuntimeClass return the runtime class name for the NemoEvaluator deployment
 func (n *NemoEvaluator) GetRuntimeClass() string {
 	return n.Spec.RuntimeClass
 }
 
-// GetHPA returns the HPA spec for the NemoGuardrail deployment
+// GetHPA returns the HPA spec for the NemoEvaluator deployment
 func (n *NemoEvaluator) GetHPA() HorizontalPodAutoscalerSpec {
 	return n.Spec.Scale.HPA
 }
 
-// GetServiceMonitor returns the Service Monitor details for the NemoGuardrail deployment
+// GetServiceMonitor returns the Service Monitor details for the NemoEvaluator deployment
 func (n *NemoEvaluator) GetServiceMonitor() ServiceMonitor {
 	return n.Spec.Metrics.ServiceMonitor
 }
 
-// GetReplicas returns replicas for the NemoGuardrail deployment
+// GetReplicas returns replicas for the NemoEvaluator deployment
 func (n *NemoEvaluator) GetReplicas() int {
 	if n.IsAutoScalingEnabled() {
 		return 0
@@ -431,48 +439,48 @@ func (n *NemoEvaluator) GetReplicas() int {
 	return n.Spec.Replicas
 }
 
-// GetDeploymentKind returns the kind of deployment for NemoGuardrail
+// GetDeploymentKind returns the kind of deployment for NemoEvaluator
 func (n *NemoEvaluator) GetDeploymentKind() string {
 	return "Deployment"
 }
 
-// IsAutoScalingEnabled returns true if autoscaling is enabled for NemoGuardrail deployment
+// IsAutoScalingEnabled returns true if autoscaling is enabled for NemoEvaluator deployment
 func (n *NemoEvaluator) IsAutoScalingEnabled() bool {
 	return n.Spec.Scale.Enabled != nil && *n.Spec.Scale.Enabled
 }
 
-// IsIngressEnabled returns true if ingress is enabled for NemoGuardrail deployment
+// IsIngressEnabled returns true if ingress is enabled for NemoEvaluator deployment
 func (n *NemoEvaluator) IsIngressEnabled() bool {
 	return n.Spec.Expose.Ingress.Enabled != nil && *n.Spec.Expose.Ingress.Enabled
 }
 
-// GetIngressSpec returns the Ingress spec NemoGuardrail deployment
+// GetIngressSpec returns the Ingress spec NemoEvaluator deployment
 func (n *NemoEvaluator) GetIngressSpec() networkingv1.IngressSpec {
 	return n.Spec.Expose.Ingress.Spec
 }
 
-// IsServiceMonitorEnabled returns true if servicemonitor is enabled for NemoGuardrail deployment
+// IsServiceMonitorEnabled returns true if servicemonitor is enabled for NemoEvaluator deployment
 func (n *NemoEvaluator) IsServiceMonitorEnabled() bool {
 	return n.Spec.Metrics.Enabled != nil && *n.Spec.Metrics.Enabled
 }
 
-// GetServicePort returns the service port for the NemoGuardrail deployment
+// GetServicePort returns the service port for the NemoEvaluator deployment
 func (n *NemoEvaluator) GetServicePort() int32 {
 	return n.Spec.Expose.Service.Port
 }
 
-// GetServiceType returns the service type for the NemoGuardrail deployment
+// GetServiceType returns the service type for the NemoEvaluator deployment
 func (n *NemoEvaluator) GetServiceType() string {
 	return string(n.Spec.Expose.Service.Type)
 }
 
-// GetUserID returns the user ID for the NemoGuardrail deployment
+// GetUserID returns the user ID for the NemoEvaluator deployment
 func (n *NemoEvaluator) GetUserID() *int64 {
 	return n.Spec.UserID
 
 }
 
-// GetGroupID returns the group ID for the NemoGuardrail deployment
+// GetGroupID returns the group ID for the NemoEvaluator deployment
 func (n *NemoEvaluator) GetGroupID() *int64 {
 	return n.Spec.GroupID
 
@@ -539,6 +547,8 @@ func (n *NemoEvaluator) GetDeploymentParams() *rendertypes.DeploymentParams {
 
 	// Set runtime class
 	params.RuntimeClassName = n.GetRuntimeClass()
+
+	params.Ports = []corev1.ContainerPort{{Name: "http", Protocol: corev1.ProtocolTCP, ContainerPort: 7331}}
 	return params
 }
 
@@ -602,11 +612,12 @@ func (n *NemoEvaluator) GetServiceParams() *rendertypes.ServiceParams {
 	params.SelectorLabels = n.GetSelectorLabels()
 
 	// Set service type
-	params.Type = n.GetServiceType()
+	params.Type = "ClusterIP"
 
 	// Set service ports
-	params.Port = n.GetServicePort()
-	params.PortName = "service-port"
+	params.Port = 7331
+	params.TargetPort = 7331
+	params.PortName = "http"
 	return params
 }
 
@@ -635,10 +646,9 @@ func (n *NemoEvaluator) GetRoleParams() *rendertypes.RoleParams {
 	// Set rules to use SCC
 	params.Rules = []rbacv1.PolicyRule{
 		{
-			APIGroups:     []string{"security.openshift.io"},
-			Resources:     []string{"securitycontextconstraints"},
-			ResourceNames: []string{"nonroot"},
-			Verbs:         []string{"use"},
+			APIGroups: []string{""},
+			Resources: []string{"secrets"},
+			Verbs:     []string{"create"},
 		},
 	}
 
@@ -691,7 +701,7 @@ func (n *NemoEvaluator) GetHPAParams() *rendertypes.HPAParams {
 func (n *NemoEvaluator) GetSCCParams() *rendertypes.SCCParams {
 	params := &rendertypes.SCCParams{}
 	// Set metadata
-	params.Name = "nemo-guardrails-scc"
+	params.Name = "nemo-evaluators-scc"
 
 	params.ServiceAccountName = n.GetServiceAccountName()
 	return params
@@ -720,41 +730,41 @@ func (n *NemoEvaluator) GetServiceMonitorParams() *rendertypes.ServiceMonitorPar
 }
 
 func (n *NemoEvaluator) GetIngressAnnotations() map[string]string {
-	NemoGuardrailAnnotations := n.GetNemoEvaluatorAnnotations()
+	NemoEvaluatorAnnotations := n.GetNemoEvaluatorAnnotations()
 
 	if n.Spec.Expose.Ingress.Annotations != nil {
-		return utils.MergeMaps(NemoGuardrailAnnotations, n.Spec.Expose.Ingress.Annotations)
+		return utils.MergeMaps(NemoEvaluatorAnnotations, n.Spec.Expose.Ingress.Annotations)
 	}
-	return NemoGuardrailAnnotations
+	return NemoEvaluatorAnnotations
 }
 
 func (n *NemoEvaluator) GetServiceAnnotations() map[string]string {
-	NemoGuardrailAnnotations := n.GetNemoEvaluatorAnnotations()
+	NemoEvaluatorAnnotations := n.GetNemoEvaluatorAnnotations()
 
 	if n.Spec.Expose.Service.Annotations != nil {
-		return utils.MergeMaps(NemoGuardrailAnnotations, n.Spec.Expose.Service.Annotations)
+		return utils.MergeMaps(NemoEvaluatorAnnotations, n.Spec.Expose.Service.Annotations)
 	}
-	return NemoGuardrailAnnotations
+	return NemoEvaluatorAnnotations
 }
 
 func (n *NemoEvaluator) GetHPAAnnotations() map[string]string {
-	NemoGuardrailAnnotations := n.GetNemoEvaluatorAnnotations()
+	NemoEvaluatorAnnotations := n.GetNemoEvaluatorAnnotations()
 
 	if n.Spec.Scale.Annotations != nil {
-		return utils.MergeMaps(NemoGuardrailAnnotations, n.Spec.Scale.Annotations)
+		return utils.MergeMaps(NemoEvaluatorAnnotations, n.Spec.Scale.Annotations)
 	}
-	return NemoGuardrailAnnotations
+	return NemoEvaluatorAnnotations
 }
 
 func (n *NemoEvaluator) GetServiceMonitorAnnotations() map[string]string {
-	NemoGuardrailAnnotations := n.GetNemoEvaluatorAnnotations()
+	NemoEvaluatorAnnotations := n.GetNemoEvaluatorAnnotations()
 
 	if n.Spec.Metrics.ServiceMonitor.Annotations != nil {
-		return utils.MergeMaps(NemoGuardrailAnnotations, n.Spec.Metrics.ServiceMonitor.Annotations)
+		return utils.MergeMaps(NemoEvaluatorAnnotations, n.Spec.Metrics.ServiceMonitor.Annotations)
 	}
-	return NemoGuardrailAnnotations
+	return NemoEvaluatorAnnotations
 }
 
 func init() {
-	SchemeBuilder.Register(&NemoGuardrail{}, &NemoGuardrailList{})
+	SchemeBuilder.Register(&NemoEvaluator{}, &NemoEvaluatorList{})
 }

@@ -28,7 +28,6 @@ import (
 	"github.com/NVIDIA/k8s-nim-operator/internal/shared"
 	"github.com/NVIDIA/k8s-nim-operator/internal/utils"
 	"github.com/go-logr/logr"
-	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -52,7 +51,7 @@ import (
 // NemoEvaluatorFinalizer is the finalizer annotation
 const NemoEvaluatorFinalizer = "finalizer.NemoEvaluator.apps.nvidia.com"
 
-// NemoGuardrailReconciler reconciles a NemoGuardrail object
+// NemoEvaluatorReconciler reconciles a NemoEvaluator object
 type NemoEvaluatorReconciler struct {
 	client.Client
 	scheme           *runtime.Scheme
@@ -64,10 +63,10 @@ type NemoEvaluatorReconciler struct {
 	orchestratorType k8sutil.OrchestratorType
 }
 
-// Ensure NemoGuardrailReconciler implements the Reconciler interface
+// Ensure NemoEvaluatorReconciler implements the Reconciler interface
 var _ shared.Reconciler = &NemoEvaluatorReconciler{}
 
-// NewNemoGuardrailReconciler creates a new reconciler for NemoGuardrail with the given platform
+// NemoEvaluatorReconciler creates a new reconciler for NemoEvaluator with the given platform
 func NewNemoEvaluatorReconciler(client client.Client, scheme *runtime.Scheme, updater conditions.Updater, renderer render.Renderer, log logr.Logger) *NemoEvaluatorReconciler {
 	return &NemoEvaluatorReconciler{
 		Client:   client,
@@ -78,10 +77,9 @@ func NewNemoEvaluatorReconciler(client client.Client, scheme *runtime.Scheme, up
 	}
 }
 
-// +kubebuilder:rbac:groups=apps.nvidia.com,resources=nemoguardrails,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=apps.nvidia.com,resources=nemoguardrails/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=apps.nvidia.com,resources=nemoguardrails/finalizers,verbs=update
-// +kubebuilder:rbac:groups=apps.nvidia.com,resources=nimcaches,verbs=get;list;watch;
+// +kubebuilder:rbac:groups=apps.nvidia.com,resources=nemoevaluators,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps.nvidia.com,resources=nemoevaluators/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=apps.nvidia.com,resources=nemoevaluators/finalizers,verbs=update
 // +kubebuilder:rbac:groups=config.openshift.io,resources=clusterversions;proxies,verbs=get;list;watch
 // +kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,verbs=use,resourceNames=nonroot
@@ -100,7 +98,7 @@ func NewNemoEvaluatorReconciler(client client.Client, scheme *runtime.Scheme, up
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 // TODO(user): Modify the Reconcile function to compare the state specified by
-// the NemoGuardrail object against the actual cluster state, and then
+// the NemoEvaluator object against the actual cluster state, and then
 // perform operations to make the cluster state reflect the state specified by
 // the user.
 //
@@ -110,41 +108,41 @@ func (r *NemoEvaluatorReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	logger := log.FromContext(ctx)
 	defer r.refreshMetrics(ctx)
 
-	// Fetch the NemoGuardrail instance
+	// Fetch the NemoEvaluator instance
 	NemoEvaluator := &appsv1alpha1.NemoEvaluator{}
 	if err := r.Get(ctx, req.NamespacedName, NemoEvaluator); err != nil {
 		if client.IgnoreNotFound(err) != nil {
-			logger.Error(err, "unable to fetch NemoGuardrail", "name", req.NamespacedName)
+			logger.Error(err, "unable to fetch NemoEvaluator", "name", req.NamespacedName)
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	logger.Info("Reconciling", "NemoGuardrail", NemoEvaluator.Name)
+	logger.Info("Reconciling", "NemoEvaluator", NemoEvaluator.Name)
 
 	// Check if the instance is marked for deletion
 	if NemoEvaluator.ObjectMeta.DeletionTimestamp.IsZero() {
 		// Add finalizer if not present
-		if !controllerutil.ContainsFinalizer(NemoEvaluator, NemoGuardrailFinalizer) {
-			controllerutil.AddFinalizer(NemoEvaluator, NemoGuardrailFinalizer)
+		if !controllerutil.ContainsFinalizer(NemoEvaluator, NemoEvaluatorFinalizer) {
+			controllerutil.AddFinalizer(NemoEvaluator, NemoEvaluatorFinalizer)
 			if err := r.Update(ctx, NemoEvaluator); err != nil {
 				return ctrl.Result{}, err
 			}
 		}
 	} else {
 		// The instance is being deleted
-		if controllerutil.ContainsFinalizer(NemoEvaluator, NemoGuardrailFinalizer) {
+		if controllerutil.ContainsFinalizer(NemoEvaluator, NemoEvaluatorFinalizer) {
 			// Perform platform specific cleanup of resources
 			if err := r.cleanupNemoEvaluator(ctx, NemoEvaluator); err != nil {
 				r.GetEventRecorder().Eventf(NemoEvaluator, corev1.EventTypeNormal, "Delete",
-					"NemoGuardrail %s in deleted", NemoEvaluator.Name)
+					"NemoEvaluator %s in deleted", NemoEvaluator.Name)
 				return ctrl.Result{}, err
 			}
 
 			// Remove finalizer to allow for deletion
-			controllerutil.RemoveFinalizer(NemoEvaluator, NemoGuardrailFinalizer)
+			controllerutil.RemoveFinalizer(NemoEvaluator, NemoEvaluatorFinalizer)
 			if err := r.Update(ctx, NemoEvaluator); err != nil {
 				r.GetEventRecorder().Eventf(NemoEvaluator, corev1.EventTypeNormal, "Delete",
-					"NemoGuardrail %s finalizer removed", NemoEvaluator.Name)
+					"NemoEvaluator %s finalizer removed", NemoEvaluator.Name)
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{}, nil
@@ -158,8 +156,8 @@ func (r *NemoEvaluatorReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// Handle platform-specific reconciliation
-	if result, err := r.reconcileNemoGuardrail(ctx, NemoEvaluator); err != nil {
-		logger.Error(err, "error reconciling NemoGuardrail", "name", NemoEvaluator.Name)
+	if result, err := r.reconcileNemoEvaluator(ctx, NemoEvaluator); err != nil {
+		logger.Error(err, "error reconciling NemoEvaluator", "name", NemoEvaluator.Name)
 		return result, err
 	}
 
@@ -222,9 +220,9 @@ func (r *NemoEvaluatorReconciler) GetOrchestratorType() (k8sutil.OrchestratorTyp
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NemoEvaluatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	r.recorder = mgr.GetEventRecorderFor("nemo-guardrail-service-controller")
+	r.recorder = mgr.GetEventRecorderFor("nemo-evaluator-service-controller")
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&appsv1alpha1.NemoGuardrail{}).
+		For(&appsv1alpha1.NemoEvaluator{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.Service{}).
@@ -235,17 +233,17 @@ func (r *NemoEvaluatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&autoscalingv2.HorizontalPodAutoscaler{}).
 		WithEventFilter(predicate.Funcs{
 			UpdateFunc: func(e event.UpdateEvent) bool {
-				// Type assert to NemoGuardrail
-				if oldNemoGuardrail, ok := e.ObjectOld.(*appsv1alpha1.NemoGuardrail); ok {
-					newNemoGuardrail := e.ObjectNew.(*appsv1alpha1.NemoGuardrail)
+				// Type assert to NemoEvaluator
+				if oldNemoEvaluator, ok := e.ObjectOld.(*appsv1alpha1.NemoEvaluator); ok {
+					newNemoEvaluator := e.ObjectNew.(*appsv1alpha1.NemoEvaluator)
 
 					// Handle case where object is marked for deletion
-					if !newNemoGuardrail.ObjectMeta.DeletionTimestamp.IsZero() {
+					if !newNemoEvaluator.ObjectMeta.DeletionTimestamp.IsZero() {
 						return true
 					}
 
 					// Handle only spec updates
-					return !reflect.DeepEqual(oldNemoGuardrail.Spec, newNemoGuardrail.Spec)
+					return !reflect.DeepEqual(oldNemoEvaluator.Spec, newNemoEvaluator.Spec)
 				}
 				// For other types we watch, reconcile them
 				return true
@@ -257,22 +255,21 @@ func (r *NemoEvaluatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *NemoEvaluatorReconciler) refreshMetrics(ctx context.Context) {
 	logger := log.FromContext(ctx)
 	// List all nodes
-	NemoGuardrailList := &appsv1alpha1.NemoGuardrailList{}
-	err := r.Client.List(ctx, NemoGuardrailList, &client.ListOptions{})
+	NemoEvaluatorList := &appsv1alpha1.NemoEvaluatorList{}
+	err := r.Client.List(ctx, NemoEvaluatorList, &client.ListOptions{})
 	if err != nil {
-		logger.Error(err, "unable to list NemoGuardrails in the cluster")
+		logger.Error(err, "unable to list NemoEvaluatorrails in the cluster")
 		return
 	}
-	//refreshNemoGuardrailMetrics(NemoGuardrailList)
 }
 
-func (r *NemoEvaluatorReconciler) reconcileNemoGuardrail(ctx context.Context, NemoEvaluator *appsv1alpha1.NemoEvaluator) (ctrl.Result, error) {
+func (r *NemoEvaluatorReconciler) reconcileNemoEvaluator(ctx context.Context, NemoEvaluator *appsv1alpha1.NemoEvaluator) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	var err error
 	defer func() {
 		if err != nil {
 			r.GetEventRecorder().Eventf(NemoEvaluator, corev1.EventTypeWarning, conditions.Failed,
-				"NemoGuardrail %s failed, msg: %s", NemoEvaluator.Name, err.Error())
+				"NemoEvaluator %s failed, msg: %s", NemoEvaluator.Name, err.Error())
 		}
 	}()
 	// Generate annotation for the current operator-version and apply to all resources
@@ -313,54 +310,48 @@ func (r *NemoEvaluatorReconciler) reconcileNemoGuardrail(ctx context.Context, Ne
 		return ctrl.Result{}, err
 	}
 
-	// Sync ingress
-	if NemoEvaluator.IsIngressEnabled() {
-		err = r.renderAndSyncResource(ctx, NemoEvaluator, &renderer, &networkingv1.Ingress{}, func() (client.Object, error) {
-			return renderer.Ingress(NemoEvaluator.GetIngressParams())
-		}, "ingress", conditions.ReasonIngressFailed)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-	} else {
-		err = r.cleanupResource(ctx, &networkingv1.Ingress{}, namespacedName)
-		if err != nil && !errors.IsNotFound(err) {
-			return ctrl.Result{}, err
-		}
-	}
+	/*		// Sync ingress
+			if NemoEvaluator.IsIngressEnabled() {
+				err = r.renderAndSyncResource(ctx, NemoEvaluator, &renderer, &networkingv1.Ingress{}, func() (client.Object, error) {
+					return renderer.Ingress(NemoEvaluator.GetIngressParams())
+				}, "ingress", conditions.ReasonIngressFailed)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+			} else {
+				err = r.cleanupResource(ctx, &networkingv1.Ingress{}, namespacedName)
+				if err != nil && !errors.IsNotFound(err) {
+					return ctrl.Result{}, err
+				}
+			}
 
-	// Sync HPA
-	if NemoEvaluator.IsAutoScalingEnabled() {
-		err = r.renderAndSyncResource(ctx, NemoEvaluator, &renderer, &autoscalingv2.HorizontalPodAutoscaler{}, func() (client.Object, error) {
-			return renderer.HPA(NemoEvaluator.GetHPAParams())
-		}, "hpa", conditions.ReasonHPAFailed)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-	} else {
-		// If autoscaling is disabled, ensure the HPA is deleted
-		err = r.cleanupResource(ctx, &autoscalingv2.HorizontalPodAutoscaler{}, namespacedName)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-	}
+			// Sync HPA
+			if NemoEvaluator.IsAutoScalingEnabled() {
+				err = r.renderAndSyncResource(ctx, NemoEvaluator, &renderer, &autoscalingv2.HorizontalPodAutoscaler{}, func() (client.Object, error) {
+					return renderer.HPA(NemoEvaluator.GetHPAParams())
+				}, "hpa", conditions.ReasonHPAFailed)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+			} else {
+				// If autoscaling is disabled, ensure the HPA is deleted
+				err = r.cleanupResource(ctx, &autoscalingv2.HorizontalPodAutoscaler{}, namespacedName)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+			}
 
-	// Sync Service Monitor
-	if NemoEvaluator.IsServiceMonitorEnabled() {
-		err = r.renderAndSyncResource(ctx, NemoEvaluator, &renderer, &monitoringv1.ServiceMonitor{}, func() (client.Object, error) {
-			return renderer.ServiceMonitor(NemoEvaluator.GetServiceMonitorParams())
-		}, "servicemonitor", conditions.ReasonServiceMonitorFailed)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-	}
+			// Sync Service Monitor
+			if NemoEvaluator.IsServiceMonitorEnabled() {
+				err = r.renderAndSyncResource(ctx, NemoEvaluator, &renderer, &monitoringv1.ServiceMonitor{}, func() (client.Object, error) {
+					return renderer.ServiceMonitor(NemoEvaluator.GetServiceMonitorParams())
+				}, "servicemonitor", conditions.ReasonServiceMonitorFailed)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+			} */
 
 	deploymentParams := NemoEvaluator.GetDeploymentParams()
-
-	// Setup volume mounts with model store
-	deploymentParams.Volumes = NemoEvaluator.GetVolumes()
-	deploymentParams.VolumeMounts = NemoEvaluator.GetVolumeMounts()
-
-	logger.Info("Reconciling", "volumes", NemoEvaluator.GetVolumes())
 
 	// Sync deployment
 	err = r.renderAndSyncResource(ctx, NemoEvaluator, &renderer, &appsv1.Deployment{}, func() (client.Object, error) {
@@ -380,12 +371,12 @@ func (r *NemoEvaluatorReconciler) reconcileNemoGuardrail(ctx context.Context, Ne
 		// Update status as NotReady
 		err = r.SetConditionsNotReady(ctx, NemoEvaluator, conditions.NotReady, msg)
 		r.GetEventRecorder().Eventf(NemoEvaluator, corev1.EventTypeNormal, conditions.NotReady,
-			"NemoGuardrail %s not ready yet, msg: %s", NemoEvaluator.Name, msg)
+			"NemoEvaluator %s not ready yet, msg: %s", NemoEvaluator.Name, msg)
 	} else {
 		// Update status as ready
 		err = r.SetConditionsReady(ctx, NemoEvaluator, conditions.Ready, msg)
 		r.GetEventRecorder().Eventf(NemoEvaluator, corev1.EventTypeNormal, conditions.Ready,
-			"NemoGuardrail %s ready, msg: %s", NemoEvaluator.Name, msg)
+			"NemoEvaluator %s ready, msg: %s", NemoEvaluator.Name, msg)
 	}
 
 	if err != nil {
@@ -396,17 +387,17 @@ func (r *NemoEvaluatorReconciler) reconcileNemoGuardrail(ctx context.Context, Ne
 	return ctrl.Result{}, nil
 }
 
-func (r *NemoEvaluatorReconciler) renderAndSyncResource(ctx context.Context, NemoGuardrail client.Object, renderer *render.Renderer, obj client.Object, renderFunc func() (client.Object, error), conditionType string, reason string) error {
+func (r *NemoEvaluatorReconciler) renderAndSyncResource(ctx context.Context, NemoEvaluator client.Object, renderer *render.Renderer, obj client.Object, renderFunc func() (client.Object, error), conditionType string, reason string) error {
 	logger := log.FromContext(ctx)
 
-	namespacedName := types.NamespacedName{Name: NemoGuardrail.GetName(), Namespace: NemoGuardrail.GetNamespace()}
+	namespacedName := types.NamespacedName{Name: NemoEvaluator.GetName(), Namespace: NemoEvaluator.GetNamespace()}
 
 	resource, err := renderFunc()
 	if err != nil {
 		logger.Error(err, "failed to render", conditionType, namespacedName)
-		statusError := r.updater.SetConditionsFailed(ctx, NemoGuardrail, reason, err.Error())
+		statusError := r.updater.SetConditionsFailed(ctx, NemoEvaluator, reason, err.Error())
 		if statusError != nil {
-			logger.Error(statusError, "failed to update status", "NemoGuardrail", NemoGuardrail.GetName())
+			logger.Error(statusError, "failed to update status", "NemoEvaluator", NemoEvaluator.GetName())
 		}
 		return err
 	}
@@ -428,11 +419,11 @@ func (r *NemoEvaluatorReconciler) renderAndSyncResource(ctx context.Context, Nem
 		return nil
 	}
 
-	if err = controllerutil.SetControllerReference(NemoGuardrail, resource, r.GetScheme()); err != nil {
+	if err = controllerutil.SetControllerReference(NemoEvaluator, resource, r.GetScheme()); err != nil {
 		logger.Error(err, "failed to set owner", conditionType, namespacedName)
-		statusError := r.updater.SetConditionsFailed(ctx, NemoGuardrail, reason, err.Error())
+		statusError := r.updater.SetConditionsFailed(ctx, NemoEvaluator, reason, err.Error())
 		if statusError != nil {
-			logger.Error(statusError, "failed to update status", "NemoGuardrail", NemoGuardrail.GetName())
+			logger.Error(statusError, "failed to update status", "NemoEvaluator", NemoEvaluator.GetName())
 		}
 		return err
 	}
@@ -440,9 +431,9 @@ func (r *NemoEvaluatorReconciler) renderAndSyncResource(ctx context.Context, Nem
 	err = r.syncResource(ctx, obj, resource, namespacedName)
 	if err != nil {
 		logger.Error(err, "failed to sync", conditionType, namespacedName)
-		statusError := r.updater.SetConditionsFailed(ctx, NemoGuardrail, reason, err.Error())
+		statusError := r.updater.SetConditionsFailed(ctx, NemoEvaluator, reason, err.Error())
 		if statusError != nil {
-			logger.Error(statusError, "failed to update status", "NemoGuardrail", NemoGuardrail.GetName())
+			logger.Error(statusError, "failed to update status", "NemoEvaluator", NemoEvaluator.GetName())
 		}
 		return err
 	}
@@ -559,8 +550,8 @@ func (r *NemoEvaluatorReconciler) SetConditionsReady(ctx context.Context, cr *ap
 		Reason: conditions.Ready,
 	})
 
-	cr.Status.State = appsv1alpha1.NemoGuardrailStatusReady
-	return r.updateNemoGuardrailStatus(ctx, cr)
+	cr.Status.State = appsv1alpha1.NemoEvaluatorStatusReady
+	return r.updateNemoEvaluatorStatus(ctx, cr)
 }
 
 func (r *NemoEvaluatorReconciler) SetConditionsNotReady(ctx context.Context, cr *appsv1alpha1.NemoEvaluator, reason, message string) error {
@@ -578,8 +569,8 @@ func (r *NemoEvaluatorReconciler) SetConditionsNotReady(ctx context.Context, cr 
 		Message: message,
 	})
 
-	cr.Status.State = appsv1alpha1.NemoGuardrailStatusNotReady
-	return r.updateNemoGuardrailStatus(ctx, cr)
+	cr.Status.State = appsv1alpha1.NemoEvaluatorStatusNotReady
+	return r.updateNemoEvaluatorStatus(ctx, cr)
 }
 
 func (r *NemoEvaluatorReconciler) SetConditionsFailed(ctx context.Context, cr *appsv1alpha1.NemoEvaluator, reason, message string) error {
@@ -595,11 +586,11 @@ func (r *NemoEvaluatorReconciler) SetConditionsFailed(ctx context.Context, cr *a
 		Reason:  reason,
 		Message: message,
 	})
-	cr.Status.State = appsv1alpha1.NemoGuardrailStatusFailed
-	return r.updateNemoGuardrailStatus(ctx, cr)
+	cr.Status.State = appsv1alpha1.NemoEvaluatorStatusFailed
+	return r.updateNemoEvaluatorStatus(ctx, cr)
 }
 
-func (r *NemoEvaluatorReconciler) updateNemoGuardrailStatus(ctx context.Context, cr *appsv1alpha1.NemoEvaluator) error {
+func (r *NemoEvaluatorReconciler) updateNemoEvaluatorStatus(ctx context.Context, cr *appsv1alpha1.NemoEvaluator) error {
 
 	obj := &appsv1alpha1.NemoEvaluator{}
 	errGet := r.Get(ctx, types.NamespacedName{Name: cr.Name, Namespace: cr.GetNamespace()}, obj)

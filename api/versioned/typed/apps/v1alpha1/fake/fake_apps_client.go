@@ -43,6 +43,11 @@ func (c *FakeAppsV1alpha1) NemoGuardrails(namespace string) v1alpha1.NemoGuardra
 	return &FakeNemoGuardrails{c, namespace}
 }
 
+func (c *FakeAppsV1alpha1) NemoEvaluators(namespace string) v1alpha1.NemoEvaluatorInterface {
+	//TODO implement me
+	panic("implement me")
+}
+
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
 func (c *FakeAppsV1alpha1) RESTClient() rest.Interface {

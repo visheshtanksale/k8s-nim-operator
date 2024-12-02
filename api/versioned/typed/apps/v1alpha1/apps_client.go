@@ -31,6 +31,7 @@ type AppsV1alpha1Interface interface {
 	NIMPipelinesGetter
 	NIMServicesGetter
 	NemoGuardrailsGetter
+	NemoEvaluatorGetter
 }
 
 // AppsV1alpha1Client is used to interact with features provided by the apps group.
@@ -52,6 +53,10 @@ func (c *AppsV1alpha1Client) NIMServices(namespace string) NIMServiceInterface {
 
 func (c *AppsV1alpha1Client) NemoGuardrails(namespace string) NemoGuardrailInterface {
 	return newNemoGuardrails(c, namespace)
+}
+
+func (c *AppsV1alpha1Client) NemoEvaluators(namespace string) NemoEvaluatorInterface {
+	return newNemoEvaluators(c, namespace)
 }
 
 // NewForConfig creates a new AppsV1alpha1Client for the given config.
