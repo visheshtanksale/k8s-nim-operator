@@ -33,10 +33,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	apiResource "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
@@ -725,7 +727,7 @@ func (r *NIMCacheReconciler) reconcileJob(ctx context.Context, nimCache *appsv1a
 	}
 
 	// If Job does not exist and caching is not complete, create a new one
-	if err != nil && nimCache.Status.State != appsv1alpha1.NimCacheStatusReady {
+	if err != nil && !meta.IsStatusConditionTrue(nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionJobCreated) {
 		job, err := r.constructJob(ctx, nimCache, r.orchestratorType)
 		if err != nil {
 			logger.Error(err, "Failed to construct job")
@@ -759,10 +761,9 @@ func (r *NIMCacheReconciler) reconcileJobStatus(ctx context.Context, nimCache *a
 	jobName := job.Name
 
 	switch {
-	case job.Status.Succeeded > 0 && nimCache.Status.State != appsv1alpha1.NimCacheStatusReady:
+	case job.Status.Succeeded > 0 && !meta.IsStatusConditionTrue(nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionJobCompleted):
 		logger.Info("Job completed", "job", jobName)
 		conditions.UpdateCondition(&nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionJobCompleted, metav1.ConditionTrue, "JobCompleted", "The Job to cache NIM has successfully completed")
-		nimCache.Status.State = appsv1alpha1.NimCacheStatusReady
 		nimCache.Status.PVC = shared.GetPVCName(nimCache, nimCache.Spec.Storage.PVC)
 
 		selectedProfiles, err := getSelectedProfiles(nimCache)
@@ -806,11 +807,104 @@ func (r *NIMCacheReconciler) reconcileJobStatus(ctx context.Context, nimCache *a
 		nimCache.Status.State = appsv1alpha1.NimCacheStatusInProgress
 		nimCache.Status.Profiles = []appsv1alpha1.NIMProfile{}
 
-	case job.Status.Active == 0 && nimCache.Status.State != appsv1alpha1.NimCacheStatusReady && nimCache.Status.State != appsv1alpha1.NimCacheStatusPending:
+	case job.Status.Active == 0 && !meta.IsStatusConditionTrue(nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionJobCompleted):
 		logger.Info("Caching NIM is in progress, job pending", "job", jobName)
 		conditions.UpdateCondition(&nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionJobPending, metav1.ConditionTrue, "JobPending", "The Job to cache NIM is in pending state")
 		nimCache.Status.State = appsv1alpha1.NimCacheStatusPending
 		nimCache.Status.Profiles = []appsv1alpha1.NIMProfile{}
+
+	}
+
+	return nil
+}
+
+func (r *NIMCacheReconciler) reconcileEngineBuild(ctx context.Context, nimCache *appsv1alpha1.NIMCache) error {
+	logger := r.GetLogger()
+	// If the NIMCache is not in a state to build engines, return early
+	// Wait for caching to complete before building engines
+	if meta.IsStatusConditionTrue(nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionJobCompleted) {
+		buildableProfiles := getBuildableProfiles(nimCache)
+
+		if buildableProfiles != nil {
+			switch {
+			case len(buildableProfiles) > 1:
+				logger.Info("Multiple buildable profiles found", "Profiles", buildableProfiles)
+				conditions.UpdateCondition(&nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionMultipleBuildableProfilesFound, metav1.ConditionTrue, "MultipleBuildableProfilesFound", "Multiple buildable profiles found, wont build engines for any of the profiles")
+				nimCache.Status.State = appsv1alpha1.NimCacheStatusReady
+				return nil
+			case len(buildableProfiles) == 1:
+				logger.Info("Single buildable profile found", "Profile", buildableProfiles[0].Name)
+				conditions.UpdateCondition(&nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionSingleBuildableProfilesFound, metav1.ConditionTrue, "BuildableProfileFound", "Single buildable profile found")
+				pod := &corev1.Pod{}
+				podName := types.NamespacedName{Name: nimCache.Name + "-engine-build-pod", Namespace: nimCache.GetNamespace()}
+				err := r.Get(ctx, podName, pod)
+				if err != nil && client.IgnoreNotFound(err) != nil {
+					return err
+				}
+				// If pod does not exist and caching is not complete, create a new one
+				if err != nil && !meta.IsStatusConditionTrue(nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionEngineBuildPodCreated) {
+					pod, err = r.constructEngineBuildPod(ctx, nimCache, r.orchestratorType, buildableProfiles[0])
+					if err != nil {
+						logger.Error(err, "Failed to construct job")
+						return err
+					}
+					if err := controllerutil.SetControllerReference(nimCache, pod, r.GetScheme()); err != nil {
+						return err
+					}
+					err = r.Create(ctx, pod)
+					if err != nil {
+						logger.Error(err, "Failed to create pod")
+						return err
+					}
+					logger.Info("Created pod for NIM Cache engine build", "pod", podName)
+					conditions.UpdateCondition(&nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionEngineBuildPodCreated, metav1.ConditionTrue, "EngineBuildPodCreated", "The pod to build engine has been created")
+					return nil
+				}
+
+				// Reconcile the job status
+				if err := r.reconcileEngineBuildPodStatus(ctx, nimCache, pod); err != nil {
+					return err
+				}
+				return nil
+			default:
+				logger.Info("No buildable profiles found, skipping engine build")
+				conditions.UpdateCondition(&nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionNoBuildableProfilesFound, metav1.ConditionTrue, "NoBuildableProfilesFound", "No buildable profiles found for NIM Cache")
+				nimCache.Status.State = appsv1alpha1.NimCacheStatusReady
+				return nil
+			}
+
+		} else {
+			logger.Info("No buildable profiles found, skipping engine build")
+			conditions.UpdateCondition(&nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionNoBuildableProfilesFound, metav1.ConditionTrue, "NoBuildableProfilesFound", "No buildable profiles found for NIM Cache")
+			nimCache.Status.State = appsv1alpha1.NimCacheStatusReady
+		}
+	}
+	return nil
+}
+
+func (r *NIMCacheReconciler) reconcileEngineBuildPodStatus(ctx context.Context, nimCache *appsv1alpha1.NIMCache, pod *corev1.Pod) error {
+	logger := log.FromContext(ctx)
+	podName := pod.Name
+
+	switch {
+	case isPodReady(pod) && !meta.IsStatusConditionTrue(nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionEngineBuildPodCompleted):
+		logger.Info("Pod Ready", "pod", podName)
+		conditions.UpdateCondition(&nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionEngineBuildPodCompleted, metav1.ConditionTrue, "PodReady", "The Pod to cache NIM has successfully completed")
+		nimCache.Status.State = appsv1alpha1.NimCacheStatusReady
+		if err := r.deletePod(ctx, pod); err != nil {
+			logger.Error(err, "Unable to delete NIM Cache build engine pod", "Name", pod.Name)
+			return err
+		}
+
+	case pod.Status.Phase == corev1.PodFailed && !meta.IsStatusConditionTrue(nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionEngineBuildPodCompleted):
+		logger.Info("Failed to cache NIM, build pod failed", "pod", pod)
+		conditions.UpdateCondition(&nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionEngineBuildPodCreated, metav1.ConditionFalse, "PodFailed", "The pod to build engine has failed")
+		nimCache.Status.State = appsv1alpha1.NimCacheStatusFailed
+
+	case !isPodReady(pod) && !meta.IsStatusConditionTrue(nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionEngineBuildPodCompleted):
+		logger.Info("Caching NIM is in progress, build engine pod running", "job", podName)
+		conditions.UpdateCondition(&nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionEngineBuildPodPending, metav1.ConditionTrue, "PodRunning", "The Pod to cache NIM is in progress")
+		nimCache.Status.State = appsv1alpha1.NimCacheStatusInProgress
 
 	}
 
@@ -883,6 +977,12 @@ func (r *NIMCacheReconciler) reconcileNIMCache(ctx context.Context, nimCache *ap
 		return ctrl.Result{}, err
 	}
 
+	err = r.reconcileEngineBuild(ctx, nimCache)
+	if err != nil {
+		logger.Error(err, "reconciliation of engine build job failed", "job", getJobName(nimCache))
+		return ctrl.Result{}, err
+	}
+
 	conditions.IfPresentUpdateCondition(&nimCache.Status.Conditions, appsv1alpha1.NimCacheConditionReconcileFailed, metav1.ConditionFalse, "Reconciled", "")
 
 	err = r.updateNIMCacheStatus(ctx, nimCache)
@@ -891,6 +991,16 @@ func (r *NIMCacheReconciler) reconcileNIMCache(ctx context.Context, nimCache *ap
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+func getBuildableProfiles(cache *appsv1alpha1.NIMCache) []appsv1alpha1.NIMProfile {
+	var buildableProfiles []appsv1alpha1.NIMProfile
+	for _, profile := range cache.Status.Profiles {
+		if profile.Config["trtllm_buildable"] == "true" {
+			buildableProfiles = append(buildableProfiles, profile)
+		}
+	}
+	return buildableProfiles
 }
 
 func (r *NIMCacheReconciler) updateNIMCacheStatus(ctx context.Context, nimCache *appsv1alpha1.NIMCache) error {
@@ -1269,6 +1379,202 @@ func (r *NIMCacheReconciler) constructJob(ctx context.Context, nimCache *appsv1a
 	return job, nil
 }
 
+func (r *NIMCacheReconciler) constructEngineBuildPod(ctx context.Context, nimCache *appsv1alpha1.NIMCache, platformType k8sutil.OrchestratorType, nimProfile appsv1alpha1.NIMProfile) (*corev1.Pod, error) {
+	logger := r.GetLogger()
+	pvcName := shared.GetPVCName(nimCache, nimCache.Spec.Storage.PVC)
+	labels := map[string]string{
+		"app":                          "k8s-nim-operator",
+		"app.kubernetes.io/name":       nimCache.Name,
+		"app.kubernetes.io/managed-by": "k8s-nim-operator",
+	}
+
+	annotations := map[string]string{
+		"sidecar.istio.io/inject": "false",
+	}
+
+	// If no user-provided GPU resource is found, proceed with auto-assignment
+	// Get tensorParallelism from the profile
+	tensorParallelism, err := utils.GetTensorParallelismByProfileTags(nimProfile.Config)
+	if err != nil {
+		logger.Error(err, "Failed to retrieve tensorParallelism")
+		return nil, err
+	}
+
+	gpuQuantity, err := apiResource.ParseQuantity(tensorParallelism)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse tensorParallelism: %w", err)
+	}
+
+	if platformType == k8sutil.OpenShift {
+		if nimCache.GetProxySpec() != nil {
+			annotations["openshift.io/scc"] = "anyuid"
+		} else {
+			annotations["openshift.io/scc"] = "nonroot"
+		}
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        nimCache.Name + "-engine-build-pod",
+			Namespace:   nimCache.Namespace,
+			Labels:      labels,
+			Annotations: annotations,
+		},
+		Spec: corev1.PodSpec{
+			RuntimeClassName: nimCache.GetRuntimeClassName(),
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsUser:    nimCache.GetUserID(),
+				FSGroup:      nimCache.GetGroupID(),
+				RunAsNonRoot: ptr.To[bool](true),
+			},
+			Containers:    []corev1.Container{},
+			RestartPolicy: corev1.RestartPolicyNever,
+			Volumes: []corev1.Volume{
+				{
+					Name: "nim-cache-volume",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: pvcName,
+						},
+					},
+				},
+			},
+			ImagePullSecrets:   []corev1.LocalObjectReference{},
+			ServiceAccountName: NIMCacheServiceAccount,
+			Tolerations:        nimCache.GetTolerations(),
+			NodeSelector:       nimCache.GetNodeSelectors(),
+		},
+	}
+
+	// SeccompProfile must be set for TKGS
+	if platformType == k8sutil.TKGS {
+		pod.Spec.SecurityContext.SeccompProfile = &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		}
+	}
+
+	pod.Spec.Containers = []corev1.Container{
+		{
+			Name:    NIMCacheContainerName,
+			Image:   nimCache.Spec.Source.NGC.ModelPuller,
+			EnvFrom: nimCache.Spec.Source.EnvFromSecrets(),
+			Env: []corev1.EnvVar{
+				{
+					Name:  "NIM_CACHE_PATH",
+					Value: "/model-store",
+				},
+				{
+					Name:  "NIM_SERVER_PORT",
+					Value: "8000",
+				},
+				{
+					Name:  "NIM_HTTP_API_PORT",
+					Value: "8000",
+				},
+				{
+					Name:  "NIM_CUSTOM_MODEL_NAME",
+					Value: nimCache.Name + "-" + nimProfile.Name,
+				},
+				{
+					Name: "NGC_API_KEY",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: nimCache.Spec.Source.NGC.AuthSecret,
+							},
+							Key: "NGC_API_KEY",
+						},
+					},
+				},
+			},
+			VolumeMounts: []corev1.VolumeMount{
+				{
+					Name:      "nim-cache-volume",
+					MountPath: "/model-store",
+					SubPath:   nimCache.Spec.Storage.PVC.SubPath,
+				},
+			},
+			Resources: corev1.ResourceRequirements{
+				Limits: map[corev1.ResourceName]apiResource.Quantity{
+					"cpu":            nimCache.Spec.Resources.CPU,
+					"memory":         nimCache.Spec.Resources.Memory,
+					"nvidia.com/gpu": gpuQuantity,
+				},
+				Requests: map[corev1.ResourceName]apiResource.Quantity{
+					"cpu":            nimCache.Spec.Resources.CPU,
+					"memory":         nimCache.Spec.Resources.Memory,
+					"nvidia.com/gpu": gpuQuantity,
+				},
+			},
+			TerminationMessagePath:   "/dev/termination-log",
+			TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
+			Ports: []corev1.ContainerPort{{
+				Name:          "api",
+				ContainerPort: 8000,
+				Protocol:      corev1.ProtocolTCP,
+			}},
+			ReadinessProbe: &corev1.Probe{
+				InitialDelaySeconds: 15,
+				TimeoutSeconds:      1,
+				PeriodSeconds:       10,
+				SuccessThreshold:    1,
+				FailureThreshold:    3,
+				ProbeHandler: corev1.ProbeHandler{
+					HTTPGet: &corev1.HTTPGetAction{
+						Path: "/v1/health/ready",
+						Port: intstr.FromString("api"),
+					},
+				},
+			},
+			LivenessProbe: &corev1.Probe{
+				InitialDelaySeconds: 15,
+				TimeoutSeconds:      1,
+				PeriodSeconds:       10,
+				SuccessThreshold:    1,
+				FailureThreshold:    3,
+				ProbeHandler: corev1.ProbeHandler{
+					HTTPGet: &corev1.HTTPGetAction{
+						Path: "/v1/health/live",
+						Port: intstr.FromString("api"),
+					},
+				},
+			},
+			StartupProbe: &corev1.Probe{
+				InitialDelaySeconds: 30,
+				TimeoutSeconds:      1,
+				PeriodSeconds:       10,
+				SuccessThreshold:    1,
+				FailureThreshold:    30,
+				ProbeHandler: corev1.ProbeHandler{
+					HTTPGet: &corev1.HTTPGetAction{
+						Path: "/v1/health/ready",
+						Port: intstr.FromString("api"),
+					},
+				},
+			},
+			SecurityContext: &corev1.SecurityContext{
+				AllowPrivilegeEscalation: ptr.To[bool](false),
+				Capabilities: &corev1.Capabilities{
+					Drop: []corev1.Capability{"ALL"},
+				},
+				RunAsNonRoot: ptr.To[bool](true),
+				RunAsGroup:   nimCache.GetGroupID(),
+				RunAsUser:    nimCache.GetUserID(),
+			},
+		},
+	}
+	pod.Spec.ImagePullSecrets = []corev1.LocalObjectReference{
+		{
+			Name: nimCache.Spec.Source.NGC.PullSecret,
+		},
+	}
+
+	// Merge env with the user provided values
+	pod.Spec.Containers[0].Env = utils.MergeEnvVars(pod.Spec.Containers[0].Env, nimCache.Spec.Env)
+
+	return pod, nil
+}
+
 // getConfigMap retrieves the given ConfigMap.
 func (r *NIMCacheReconciler) getConfigMap(ctx context.Context, name, namespace string) (*corev1.ConfigMap, error) {
 	configMap := &corev1.ConfigMap{}
@@ -1406,4 +1712,23 @@ func getUniqueGPUProducts(nodeGPUProducts map[string]string) []string {
 	}
 
 	return uniqueGPUProducts
+}
+
+func isPodReady(pod *corev1.Pod) bool {
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type == corev1.PodReady {
+			return cond.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
+func (r *NIMCacheReconciler) deletePod(ctx context.Context, pod *corev1.Pod) error {
+	logger := log.FromContext(ctx)
+	logger.Info("Deleting Engine Build Pod", "name", pod.Name, "namespace", pod.Namespace)
+	if err := r.Delete(ctx, pod); err != nil {
+		logger.Error(err, "Failed to Delete Engine Build Pod", "name", pod.Name)
+		return err
+	}
+	return nil
 }

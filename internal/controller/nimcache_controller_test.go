@@ -794,4 +794,55 @@ var _ = Describe("NIMCache Controller", func() {
 		})
 
 	})
+
+	Context("when creating a NIMCache resource", func() {
+		It("with no buildable profile select, should not create a build job", func() {
+			ctx := context.TODO()
+			runtimeClassName := "test-class"
+			NIMCache := &appsv1alpha1.NIMCache{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-nimcache",
+					Namespace: "default",
+				},
+				Spec: appsv1alpha1.NIMCacheSpec{
+					Source:           appsv1alpha1.NIMSource{NGC: &appsv1alpha1.NGCSource{ModelPuller: "test-container", PullSecret: "my-secret"}},
+					Storage:          appsv1alpha1.NIMCacheStorage{PVC: appsv1alpha1.PersistentVolumeClaim{Create: ptr.To[bool](true), StorageClass: "standard", Size: "1Gi"}},
+					RuntimeClassName: runtimeClassName,
+				},
+				Status: appsv1alpha1.NIMCacheStatus{
+					State: appsv1alpha1.NimCacheStatusNotReady,
+					Conditions: []metav1.Condition{{
+						Type:    appsv1alpha1.NimCacheConditionJobCompleted,
+						Status:  metav1.ConditionTrue,
+						Reason:  "ReconcileSucceeded",
+						Message: "Reconciliation succeeded",
+					}},
+				},
+			}
+			Expect(cli.Create(ctx, NIMCache)).To(Succeed())
+
+			// Reconcile the resource
+			err := reconciler.reconcileEngineBuild(ctx, NIMCache)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Wait for reconciliation to complete with a timeout
+			job := &appsv1alpha1.NIMCache{}
+			Eventually(func() error {
+				nimCacheName := types.NamespacedName{Name: "test-nimcache", Namespace: "default"}
+				return cli.Get(ctx, nimCacheName, job)
+			}, time.Second*10).Should(Succeed())
+
+			Expect(NIMCache.Status.Conditions[1].Type).To(Equal(appsv1alpha1.NimCacheConditionNoBuildableProfilesFound))
+			Expect(NIMCache.Status.Conditions[1].Status).To(Equal(metav1.ConditionTrue))
+			Expect(NIMCache.Status.Conditions[1].Reason).To(Equal("NoBuildableProfilesFound"))
+			Expect(NIMCache.Status.Conditions[1].Message).To(Equal("No buildable profiles found for NIM Cache"))
+			// Check if the PVC was created
+			// Wait for reconciliation to complete with a timeout
+			Eventually(func() error {
+				pod := &corev1.Pod{}
+				podName := types.NamespacedName{Name: NIMCache.Name + "-engine-build-pod", Namespace: "default"}
+				return cli.Get(ctx, podName, pod)
+			}, time.Second*10).Should(HaveOccurred())
+		})
+	})
 })

@@ -50,6 +50,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/NVIDIA/k8s-nim-operator/internal/utils"
+
 	appsv1alpha1 "github.com/NVIDIA/k8s-nim-operator/api/apps/v1alpha1"
 	"github.com/NVIDIA/k8s-nim-operator/internal/conditions"
 	"github.com/NVIDIA/k8s-nim-operator/internal/k8sutil"
@@ -1190,7 +1192,7 @@ var _ = Describe("NIMServiceReconciler for a standalone platform", func() {
 				Config: map[string]string{"tp": "4"},
 			}
 
-			tensorParallelism, err := reconciler.getTensorParallelismByProfile(context.TODO(), profile)
+			tensorParallelism, err := utils.GetTensorParallelismByProfileTags(profile.Config)
 			Expect(err).To(BeNil())
 			Expect(tensorParallelism).To(Equal("4"))
 		})
@@ -1200,7 +1202,7 @@ var _ = Describe("NIMServiceReconciler for a standalone platform", func() {
 				Name:   "test-profile",
 				Config: map[string]string{},
 			}
-			tensorParallelism, err := reconciler.getTensorParallelismByProfile(context.TODO(), profile)
+			tensorParallelism, err := utils.GetTensorParallelismByProfileTags(profile.Config)
 			Expect(err).To(BeNil())
 			Expect(tensorParallelism).To(BeEmpty())
 		})

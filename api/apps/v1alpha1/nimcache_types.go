@@ -192,6 +192,19 @@ const (
 	NimCacheConditionPVCCreated = "NIM_CACHE_PVC_CREATED"
 	// NimCacheConditionReconcileFailed indicated that error occurred while reconciling NIMCache object.
 	NimCacheConditionReconcileFailed = "NIM_CACHE_RECONCILE_FAILED"
+	// NimCacheConditionMultipleBuildableProfilesFound indicates that multiple buildable profiles are found for the NIMCache object.
+	NimCacheConditionMultipleBuildableProfilesFound = "NIM_CACHE_MULTIPLE_BUILDABLE_PROFILES_FOUND"
+	// NimCacheConditionSingleBuildableProfilesFound indicates that only one buildable profile is found for the NIMCache object.
+	NimCacheConditionSingleBuildableProfilesFound = "NIM_CACHE_SINGLE_BUILDABLE_PROFILES_FOUND"
+	// NimCacheConditionNoBuildableProfilesFound indicates that no buildable profiles are found for the NIMCache object.
+	NimCacheConditionNoBuildableProfilesFound = "NIM_CACHE_NO_BUILDABLE_PROFILES_FOUND"
+
+	// NimCacheConditionEngineBuildPodCreated indicates that the engine build pod is created.
+	NimCacheConditionEngineBuildPodCreated = "NIM_CACHE_ENGINE_BUILD_POD_CREATED"
+	// NimCacheConditionEngineBuildJobCompleted indicates that the engine build pod is completed.
+	NimCacheConditionEngineBuildPodCompleted = "NIM_CACHE_ENGINE_BUILD_POD_COMPLETED"
+	// NimCacheConditionEngineBuildPodPending indicates that the the engine build pod is in pending state.
+	NimCacheConditionEngineBuildPodPending = "NIM_CACHE_ENGINE_BUILD_POD_PENDING"
 
 	// NimCacheStatusNotReady indicates that cache is not ready.
 	NimCacheStatusNotReady = "NotReady"
