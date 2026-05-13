@@ -38,7 +38,7 @@ RUN git clone https://github.com/NVIDIA/k8s-operator-libs.git
 WORKDIR /utils/k8s-operator-libs
 
 #Checkout the version of the k8s-operator-libs repo that is compatible with the current version of the NIM Operator
-RUN git checkout c80af13d73e36e0eedbe9b712efa85cccb64213a
+RUN git checkout fa6a3643c44164619e5a941c53d653fe967d39ef
 
 #Build the crd-apply-tool
 RUN go build -o crd-apply-tool cmd/apply-crds/main.go
