@@ -8,5 +8,6 @@ resources:
 - nemo/latest/apps_v1alpha1_nemoevaluator.yaml
 - nemo/latest/apps_v1alpha1_nemodatastore.yaml
 - nemo/latest/apps_v1alpha1_nemoentitystore.yaml
+- nemo/latest/apps_v1alpha1_nemoagentconfig.yaml
 - apps_v1aplha1_nimbuild.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

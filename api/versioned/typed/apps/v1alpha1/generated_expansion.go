@@ -25,6 +25,8 @@ type NIMPipelineExpansion interface{}
 
 type NIMServiceExpansion interface{}
 
+type NemoAgentConfigExpansion interface{}
+
 type NemoCustomizerExpansion interface{}
 
 type NemoDatastoreExpansion interface{}

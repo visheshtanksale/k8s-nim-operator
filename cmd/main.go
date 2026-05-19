@@ -227,6 +227,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = controller.NewNemoAgentConfigReconciler(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+	).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "NemoAgentConfig")
+		os.Exit(1)
+	}
+
 	if err = controller.NewNemoGuardrailReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),

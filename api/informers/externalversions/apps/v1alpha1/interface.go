@@ -31,6 +31,8 @@ type Interface interface {
 	NIMPipelines() NIMPipelineInformer
 	// NIMServices returns a NIMServiceInformer.
 	NIMServices() NIMServiceInformer
+	// NemoAgentConfigs returns a NemoAgentConfigInformer.
+	NemoAgentConfigs() NemoAgentConfigInformer
 	// NemoCustomizers returns a NemoCustomizerInformer.
 	NemoCustomizers() NemoCustomizerInformer
 	// NemoDatastores returns a NemoDatastoreInformer.
@@ -72,6 +74,11 @@ func (v *version) NIMPipelines() NIMPipelineInformer {
 // NIMServices returns a NIMServiceInformer.
 func (v *version) NIMServices() NIMServiceInformer {
 	return &nIMServiceInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// NemoAgentConfigs returns a NemoAgentConfigInformer.
+func (v *version) NemoAgentConfigs() NemoAgentConfigInformer {
+	return &nemoAgentConfigInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // NemoCustomizers returns a NemoCustomizerInformer.

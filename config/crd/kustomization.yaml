@@ -11,6 +11,7 @@ resources:
 - bases/apps.nvidia.com_nemodatastores.yaml
 - bases/apps.nvidia.com_nemoentitystores.yaml
 - bases/apps.nvidia.com_nimbuilds.yaml
+- bases/apps.nvidia.com_nemoagentconfigs.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

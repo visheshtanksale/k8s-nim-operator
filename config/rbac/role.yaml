@@ -72,6 +72,7 @@ rules:
 - apiGroups:
   - apps.nvidia.com
   resources:
+  - nemoagentconfigs
   - nemocustomizers
   - nemodatastores
   - nemoentitystores
@@ -92,6 +93,7 @@ rules:
 - apiGroups:
   - apps.nvidia.com
   resources:
+  - nemoagentconfigs/finalizers
   - nemocustomizers/finalizers
   - nemodatastores/finalizers
   - nemoentitystores/finalizers
@@ -106,6 +108,7 @@ rules:
 - apiGroups:
   - apps.nvidia.com
   resources:
+  - nemoagentconfigs/status
   - nemocustomizers/status
   - nemodatastores/status
   - nemoentitystores/status

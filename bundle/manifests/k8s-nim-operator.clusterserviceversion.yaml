@@ -643,6 +643,18 @@ spec:
             kind: ConfigMap
         specDescriptors: [ ]
         statusDescriptors: [ ]
+      - name: nemoagentconfigs.apps.nvidia.com
+        displayName: NemoAgentConfig
+        kind: NemoAgentConfig
+        version: v1alpha1
+        description: NeMo Agent Toolkit configuration
+        resources:
+          - version: v1
+            kind: ConfigMap
+          - version: v1
+            kind: Pod
+        specDescriptors: []
+        statusDescriptors: []
       - name: nemoguardrails.apps.nvidia.com
         displayName: NemoGuardrail
         kind: NemoGuardrail
@@ -1560,4 +1572,3 @@ spec:
           - nimservices
     sideEffects: None
     webhookPath: /validate-apps-nvidia-com-v1alpha1-nimservice
-

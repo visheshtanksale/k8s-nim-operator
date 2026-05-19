@@ -49,6 +49,14 @@ type NIMServiceListerExpansion interface{}
 // NIMServiceNamespaceLister.
 type NIMServiceNamespaceListerExpansion interface{}
 
+// NemoAgentConfigListerExpansion allows custom methods to be added to
+// NemoAgentConfigLister.
+type NemoAgentConfigListerExpansion interface{}
+
+// NemoAgentConfigNamespaceListerExpansion allows custom methods to be added to
+// NemoAgentConfigNamespaceLister.
+type NemoAgentConfigNamespaceListerExpansion interface{}
+
 // NemoCustomizerListerExpansion allows custom methods to be added to
 // NemoCustomizerLister.
 type NemoCustomizerListerExpansion interface{}

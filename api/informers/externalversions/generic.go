@@ -60,6 +60,8 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Apps().V1alpha1().NIMPipelines().Informer()}, nil
 	case v1alpha1.SchemeGroupVersion.WithResource("nimservices"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Apps().V1alpha1().NIMServices().Informer()}, nil
+	case v1alpha1.SchemeGroupVersion.WithResource("nemoagentconfigs"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Apps().V1alpha1().NemoAgentConfigs().Informer()}, nil
 	case v1alpha1.SchemeGroupVersion.WithResource("nemocustomizers"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Apps().V1alpha1().NemoCustomizers().Informer()}, nil
 	case v1alpha1.SchemeGroupVersion.WithResource("nemodatastores"):
